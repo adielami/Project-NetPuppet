@@ -1,0 +1,15 @@
+# Python garbage
+__pycache__/
+*.pyc
+venv/
+
+# Build artifacts (שאריות בנייה)
+build/
+dist/
+*.spec
+*.exe
+*.zip
+
+# Logs
+*.log
+keylog_history.txt
