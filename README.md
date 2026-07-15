@@ -1,29 +1,28 @@
-# 🕸️ NetPuppet - Advanced E2E Command & Control (C2) Framework
+# 🕸️ NetPuppet - Remote Access Trojan (RAT) & Offensive Exfiltration Tool
 
-**NetPuppet** is a custom-built, full-fledged Command and Control (C2) framework and Remote Administration Tool developed in Python. 
+**NetPuppet** is an offensive-oriented Remote Access Trojan (RAT) and Command & Control (C2) framework built in Python. 
 
-This project was architected from the ground up to research and demonstrate low-level network communication (TCP sockets), data framing, persistence mechanisms, and operating system API interactions.
-
-### ⚠️ IMPORTANT DISCLAIMER: STRICTLY FOR LABORATORY USE
-> **This tool was developed EXCLUSIVELY for educational purposes and cybersecurity research.** > It is designed to be executed **only within closed, isolated laboratory environments** (e.g., isolated VMs or local loopback interfaces). The author assumes no liability for any unauthorized use. Do not deploy this on systems without explicit, documented permission.
+The tool is designed to mimic real-world threat actor behaviors: once the agent (Trojan Horse) is executed on a target machine, it bypasses basic local constraints, initiates a stealthy reverse connection back to the attacker's server, and opens a direct pipeline for total remote control and automated data exfiltration.
 
 ---
 
-## 🛠️ System Architecture & Technical Highlights
-
-Unlike basic reverse shells, NetPuppet handles common networking and synchronization challenges directly:
-* **TCP Stream Coalescence Prevention:** Implements custom data framing using `struct.pack` to transmit payload sizes ahead of data, ensuring distinct command execution without packet fusion.
-* **Multithreaded Execution:** Utilizes Python's `threading` to run blocking GUI operations (like ransomware-style popups) and global keyboard hooks without interrupting the main socket communication loop.
-* **Smart Keylogger Engine:** Includes layout-awareness (Hebrew/English translation logic) and handles shortcut combinations (Ctrl/Alt), avoiding application crashes during hook registration.
-* **Stealth & Persistence:** Modifies the Windows Startup folder for persistence and includes a silent, self-destruct mechanism that terminates the process, removes startup artifacts, and deletes the executable via hidden OS subprocesses.
+### ⚠️ LABORATORY WARNING
+> **This repository contains functional offensive software.**
+> NetPuppet was developed strictly for research, defensive engineering analysis, and laboratory testing inside isolated virtual environments. Unauthorized deployment on networks or systems you do not own is illegal.
 
 ---
 
-## 🚀 How to Operate the Lab Environment
+## 💥 Offensive Capabilities & Data Exfiltration Mechanics
 
-To test the C2 communication safely on a local machine:
+NetPuppet acts as a persistent backdoor, enabling the attacker to silently harvest and exfiltrate information through several vector pipelines:
 
-1. **Start the Listener (Server):**
-   Open a terminal and execute the server script. It will bind to `0.0.0.0` (or your configured `HOST_IP`) on port `9998` and wait for incoming connections.
-   ```bash
-   python server.py
+* **Automated Data Harvesting (Theft/Exfiltration):**
+  * **Global Keylogging:** Silently monitors and logs keystrokes (supporting full English and Hebrew translations) to capture credentials and typed data.
+  * **Surveillance (Screen & Video Capture):** Extracts real-time desktop screenshots and webcam video frames directly from the hardware, compressing and sending them over TCP.
+  * **Targeted File Exfiltration:** Commands like `download` and `zip` allow the attacker to zip entire target directories and exfiltrate raw files from the victim's hard drive to the server.
+  
+* **Stealth and Anti-Forensics (Self-Destruct):**
+  * Features a **Silent Self-Destruct (`terminate_all`)** protocol. Upon receiving the command, the agent cleans up its Startup persistence folder, drops active TCP connections, and spawns a background, windowless subprocess to permanently delete the executable file from the host's disk.
+
+* **Victim System Manipulation:**
+  * Allows execution of remote shell commands via subprocess spawning, directory traversal (`cd`), popping up uncloseable locked warning boxes (ransomware simulation), and forcing the target browser to open designated URLs.
