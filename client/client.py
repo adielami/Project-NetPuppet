@@ -15,6 +15,7 @@ import webbrowser  # Browser interaction
 import ctypes  # Windows API access
 import tkinter as tk  # GUI toolkit
 
+
 # --- Configuration ---
 # --- Configuration ---
 TARGET_IP = "127.0.0.1"  # local testing loopback
